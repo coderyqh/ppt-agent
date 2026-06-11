@@ -3,6 +3,16 @@
 
 import uvicorn
 import sys
+import logging
+
+# 配置日志
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -19,8 +29,8 @@ if __name__ == "__main__":
             "backend.main:app",
             host="0.0.0.0",
             port=8000,
-            reload=False,  # 关闭自动重载，避免问题
-            log_level="info",
+            reload=False,
+            log_level="debug",
         )
     except KeyboardInterrupt:
         print("\n服务已停止")

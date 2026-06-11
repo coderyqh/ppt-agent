@@ -2,15 +2,26 @@ from __future__ import annotations
 
 import json
 import asyncio
+import logging
 from datetime import datetime
 from typing import Dict
 
 from ..schemas.ppt import SessionStatus
 from ..routers.ws import broadcast_to_session
 
+# 配置日志
+logger = logging.getLogger("ppt_service")
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
+logger.addHandler(handler)
+
 
 async def send_progress(session_id: str, message: dict):
     """发送进度消息到WebSocket"""
+    logger.debug(f"[{session_id}] 发送消息: {message.get('type')} - {message.get('step', '')}")
     await broadcast_to_session(session_id, message)
 
 
@@ -20,6 +31,8 @@ async def generate_ppt_task(
     sessions: Dict[str, SessionStatus],
 ):
     """后台PPT生成任务"""
+    logger.info(f"[{session_id}] 开始生成任务，参数: {params}")
+
     from ppt_agent.tools import (
         create_brief,
         extract_insights,
@@ -34,18 +47,9 @@ async def generate_ppt_task(
     session.status = "processing"
     session.updated_at = datetime.now()
 
-    steps = [
-        ("brief", "解析需求", create_brief),
-        ("insights", "提取洞察", None),
-        ("outline", "构建大纲", None),
-        ("slides", "生成内容", None),
-        ("design", "应用设计", None),
-        ("review", "质量检查", None),
-        ("preview", "生成预览", None),
-    ]
-
     try:
         # Step 1: 创建Brief
+        logger.info(f"[{session_id}] Step 1: 创建Brief")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "brief",
@@ -60,6 +64,7 @@ async def generate_ppt_task(
             style=params.get("style", "consulting"),
             source_text=params.get("source_text", "") or "",
         )
+        logger.info(f"[{session_id}] Brief创建成功: {brief}")
 
         session.steps_completed.append("brief")
         session.progress = 14.3
@@ -71,6 +76,7 @@ async def generate_ppt_task(
         })
 
         # Step 2: 提取洞察
+        logger.info(f"[{session_id}] Step 2: 提取洞察")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "insights",
@@ -78,11 +84,13 @@ async def generate_ppt_task(
         })
 
         mode = params.get("mode", "rule")
+        logger.info(f"[{session_id}] 使用模式: {mode}")
         insights = await asyncio.to_thread(
             extract_insights,
             json.dumps(brief, ensure_ascii=False),
             mode,
         )
+        logger.info(f"[{session_id}] 洞察提取成功: {len(insights)} 条")
 
         session.steps_completed.append("insights")
         session.progress = 28.6
@@ -94,6 +102,7 @@ async def generate_ppt_task(
         })
 
         # Step 3: 构建大纲
+        logger.info(f"[{session_id}] Step 3: 构建大纲")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "outline",
@@ -106,6 +115,7 @@ async def generate_ppt_task(
             json.dumps(insights, ensure_ascii=False),
             mode,
         )
+        logger.info(f"[{session_id}] 大纲构建成功: {len(outline)} 页")
 
         session.steps_completed.append("outline")
         session.progress = 42.9
@@ -117,6 +127,7 @@ async def generate_ppt_task(
         })
 
         # Step 4: 生成内容
+        logger.info(f"[{session_id}] Step 4: 生成内容")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "slides",
@@ -130,6 +141,7 @@ async def generate_ppt_task(
             json.dumps(insights, ensure_ascii=False),
             mode,
         )
+        logger.info(f"[{session_id}] 内容生成成功: {len(slides)} 页")
 
         session.steps_completed.append("slides")
         session.progress = 57.2
@@ -141,6 +153,7 @@ async def generate_ppt_task(
         })
 
         # Step 5: 应用设计
+        logger.info(f"[{session_id}] Step 5: 应用设计")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "design",
@@ -153,6 +166,7 @@ async def generate_ppt_task(
             json.dumps(slides, ensure_ascii=False),
             params.get("visual_style", "dark-premium"),
         )
+        logger.info(f"[{session_id}] 设计应用成功")
 
         session.steps_completed.append("design")
         session.progress = 71.5
@@ -164,6 +178,7 @@ async def generate_ppt_task(
         })
 
         # Step 6: 质量检查
+        logger.info(f"[{session_id}] Step 6: 质量检查")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "review",
@@ -175,6 +190,7 @@ async def generate_ppt_task(
             json.dumps(deck, ensure_ascii=False),
             mode,
         )
+        logger.info(f"[{session_id}] 质量检查完成: {reviewed_deck.get('review_notes', [])}")
 
         session.steps_completed.append("review")
         session.progress = 85.8
@@ -186,6 +202,7 @@ async def generate_ppt_task(
         })
 
         # Step 7: 生成预览
+        logger.info(f"[{session_id}] Step 7: 生成预览")
         await send_progress(session_id, {
             "type": "step_start",
             "step": "preview",
@@ -196,6 +213,7 @@ async def generate_ppt_task(
             generate_html_preview,
             json.dumps(reviewed_deck, ensure_ascii=False),
         )
+        logger.info(f"[{session_id}] 预览生成成功: {preview_path}")
 
         session.steps_completed.append("preview")
         session.progress = 100.0
@@ -216,7 +234,10 @@ async def generate_ppt_task(
             "message": "PPT内容生成完成！请确认后生成PPTX文件。",
         })
 
+        logger.info(f"[{session_id}] 任务完成!")
+
     except Exception as e:
+        logger.error(f"[{session_id}] 任务失败: {str(e)}", exc_info=True)
         session.status = "failed"
         session.error = str(e)
         session.updated_at = datetime.now()

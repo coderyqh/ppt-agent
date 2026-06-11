@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .routers import ppt_router, ws_router
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger("ppt_agent_api")
 
 app = FastAPI(
     title="PPT Agent API",
@@ -25,13 +38,20 @@ app.add_middleware(
 app.include_router(ppt_router)
 app.include_router(ws_router)
 
+# 确保workspace目录存在
+workspace_dir = Path("workspace")
+workspace_dir.mkdir(exist_ok=True)
+
 # 静态文件服务（用于预览）
 app.mount("/workspace", StaticFiles(directory="workspace"), name="workspace")
+
+logger.info("PPT Agent API 启动")
 
 
 @app.get("/")
 async def root():
     """API根路径"""
+    logger.info("访问根路径")
     return {
         "name": "PPT Agent API",
         "version": "1.0.0",
