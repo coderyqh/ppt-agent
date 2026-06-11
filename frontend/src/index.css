@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bark: 30 25% 44%;
+    --moss: 140 30% 38%;
+    --sand: 33 60% 90%;
+    --clay: 28 60% 55%;
+    --cream: 33 100% 97%;
+    --earth: 25 50% 28%;
+  }
+
+  * {
+    @apply border-bark-200;
+  }
+
+  body {
+    @apply bg-cream text-bark-800 font-body;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .organic-blob {
+    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+  }
+
+  .organic-card {
+    @apply bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-bark-100;
+    background-image: 
+      radial-gradient(at 20% 80%, rgba(139, 115, 85, 0.05) 0%, transparent 50%),
+      radial-gradient(at 80% 20%, rgba(74, 124, 89, 0.05) 0%, transparent 50%);
+  }
+
+  .nature-gradient {
+    background: linear-gradient(135deg, #f0f7f2 0%, #fff8f0 50%, #f5e6d3 100%);
+  }
+
+  .leaf-pattern {
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a7c59' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  .organic-button {
+    @apply px-6 py-3 rounded-full font-body font-semibold transition-all duration-300;
+    @apply hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0;
+  }
+
+  .organic-button-primary {
+    @apply organic-button bg-moss-400 text-white;
+    @apply hover:bg-moss-500;
+  }
+
+  .organic-button-secondary {
+    @apply organic-button bg-bark-100 text-bark-700;
+    @apply hover:bg-bark-200;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-float-delayed {
+    animation: float 6s ease-in-out 2s infinite;
+  }
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(139, 115, 85, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 115, 85, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 115, 85, 0.5);
+}

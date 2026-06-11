@@ -1,0 +1,12 @@
+{
+  "name": "ppt-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Skill-based PPT agent with MiMo and PptxGenJS rendering.",
+  "scripts": {
+    "render:pptx": "node scripts/render_deck.cjs"
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0"
+  }
+}
