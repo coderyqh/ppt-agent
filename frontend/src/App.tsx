@@ -93,24 +93,38 @@ function App() {
 
   // 确认生成PPTX
   const handleConfirm = async () => {
-    if (!sessionId) return
+    if (!sessionId) {
+      setError('会话ID不存在，请重新生成PPT')
+      return
+    }
 
+    console.log('确认生成PPTX，sessionId:', sessionId)
     setIsConfirming(true)
+    setError(null)
+
     try {
-      const response = await fetch(`/api/sessions/${sessionId}/confirm`, {
+      const url = `/api/sessions/${sessionId}/confirm`
+      console.log('请求URL:', url)
+
+      const response = await fetch(url, {
         method: 'POST',
       })
 
+      console.log('响应状态:', response.status)
+
       if (!response.ok) {
-        throw new Error('生成PPTX失败')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `生成PPTX失败 (${response.status})`)
       }
 
       const data = await response.json()
+      console.log('确认成功:', data)
       setState('completed')
 
       // 触发下载
       window.open(`/api/sessions/${sessionId}/download`, '_blank')
     } catch (err) {
+      console.error('确认失败:', err)
       setError(err instanceof Error ? err.message : '生成PPTX失败')
     } finally {
       setIsConfirming(false)
