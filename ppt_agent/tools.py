@@ -315,11 +315,67 @@ def review_deck(deck_json: str, mode: str = "rule") -> dict[str, Any]:
 
 
 def generate_html_preview(deck_json: str, mode: str = "rule") -> str:
-    """生成HTML预览页面。"""
+    """生成HTML预览页面，使用PPT标准16:9比例。"""
     deck = json.loads(deck_json) if isinstance(deck_json, str) else deck_json
 
     theme = deck.get("theme", {})
     slides = deck.get("slides", [])
+    
+    # 获取主题配置
+    primary = theme.get("primary", "0A0A0A")
+    secondary = theme.get("secondary", "1D1D1F")
+    accent = theme.get("accent", "00D4FF")
+    background = theme.get("background", "0A0A0A")
+    surface = theme.get("surface", "141414")
+    text_color = theme.get("text", "FFFFFF")
+    muted = theme.get("muted", "A1A1AA")
+    header_font = theme.get("headerFont", "Arial Black")
+    body_font = theme.get("bodyFont", "Arial")
+    visual_style = theme.get("deerStyle", "dark-premium")
+
+    # 生成每页幻灯片HTML
+    slides_html = ""
+    thumbnails_html = ""
+    
+    for i, slide in enumerate(slides):
+        bullets_html = ""
+        for bullet in slide.get("bullets", []):
+            bullets_html += f'<li class="slide-bullet">{bullet}</li>\n'
+        
+        # 幻灯片内容
+        slides_html += f"""
+        <div class="slide" id="slide-{i}" style="display: {'flex' if i == 0 else 'none'}">
+            <div class="slide-content">
+                <div class="slide-header">
+                    <span class="slide-number">{slide.get('index', i+1)}</span>
+                    <span class="slide-kind">{slide.get('kind', '')}</span>
+                </div>
+                <h2 class="slide-title">{slide.get('title', '')}</h2>
+                <p class="slide-intent">{slide.get('intent', '')}</p>
+                <ul class="slide-bullets">
+                    {bullets_html}
+                </ul>
+                <div class="slide-visual">🎨 {slide.get('visual', '')}</div>
+            </div>
+            <div class="slide-notes">
+                <div class="notes-label">🎤 演讲备注</div>
+                <p>{slide.get('speaker_notes', '')}</p>
+            </div>
+        </div>
+"""
+        
+        # 缩略图
+        thumbnails_html += f"""
+        <div class="thumbnail {'active' if i == 0 else ''}" onclick="goToSlide({i})">
+            <span class="thumb-number">{i+1}</span>
+            <span class="thumb-title">{slide.get('title', '')[:10]}...</span>
+        </div>
+"""
+
+    # 审查意见HTML
+    review_html = ""
+    for note in deck.get("review_notes", []):
+        review_html += f"<li>{note}</li>\n"
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -327,147 +383,285 @@ def generate_html_preview(deck_json: str, mode: str = "rule") -> str:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{deck.get('title', 'PPT预览')}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        
         body {{
-            font-family: {theme.get('bodyFont', 'Arial')}, sans-serif;
-            background: #{theme.get('background', '0A0A0A')};
-            color: #{theme.get('text', 'FFFFFF')};
+            font-family: 'Noto Sans SC', {body_font}, sans-serif;
+            background: linear-gradient(135deg, #{background} 0%, #{surface} 100%);
+            color: #{text_color};
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
         }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }}
-        .header {{
+        
+        .presentation-header {{
             text-align: center;
-            margin-bottom: 40px;
+            margin-bottom: 30px;
+            width: 100%;
+            max-width: 960px;
         }}
-        .header h1 {{
-            font-family: {theme.get('headerFont', 'Arial Black')}, sans-serif;
-            font-size: 2.5em;
-            color: #{theme.get('accent', '00D4FF')};
+        
+        .presentation-header h1 {{
+            font-family: {header_font}, sans-serif;
+            font-size: 2em;
+            color: #{accent};
             margin-bottom: 10px;
+            text-shadow: 0 2px 10px #{accent}33;
         }}
-        .header p {{
-            color: #{theme.get('muted', 'A1A1AA')};
-            font-size: 1.1em;
+        
+        .presentation-header .meta {{
+            color: #{muted};
+            font-size: 0.9em;
         }}
-        .slides-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 24px;
-        }}
-        .slide-card {{
-            background: #{theme.get('surface', '141414')};
-            border-radius: 12px;
-            padding: 24px;
-            border: 1px solid #{theme.get('muted', 'A1A1AA')}33;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }}
-        .slide-card:hover {{
-            transform: translateY(-4px);
-            box-shadow: 0 8px 32px #{theme.get('accent', '00D4FF')}22;
-        }}
-        .slide-number {{
-            display: inline-block;
-            background: #{theme.get('accent', '00D4FF')};
-            color: #{theme.get('background', '0A0A0A')};
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            text-align: center;
-            line-height: 32px;
-            font-weight: bold;
-            margin-bottom: 12px;
-        }}
-        .slide-kind {{
-            display: inline-block;
-            background: #{theme.get('primary', '0A0A0A')};
-            color: #{theme.get('accent', '00D4FF')};
-            padding: 4px 12px;
-            border-radius: 16px;
-            font-size: 0.85em;
-            margin-left: 8px;
-        }}
-        .slide-title {{
-            font-family: {theme.get('headerFont', 'Arial Black')}, sans-serif;
-            font-size: 1.4em;
-            margin: 12px 0;
-            color: #{theme.get('text', 'FFFFFF')};
-        }}
-        .slide-intent {{
-            color: #{theme.get('muted', 'A1A1AA')};
-            font-size: 0.95em;
-            margin-bottom: 16px;
-            font-style: italic;
-        }}
-        .bullets {{
-            list-style: none;
-            margin-bottom: 16px;
-        }}
-        .bullets li {{
-            padding: 8px 0 8px 20px;
+        
+        .slide-viewer {{
+            width: 100%;
+            max-width: 960px;
             position: relative;
-            border-bottom: 1px solid #{theme.get('muted', 'A1A1AA')}22;
         }}
-        .bullets li:before {{
+        
+        .slide {{
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            background: #{surface};
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px #{muted}22;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }}
+        
+        .slide-content {{
+            flex: 1;
+            padding: 40px 50px;
+            display: flex;
+            flex-direction: column;
+        }}
+        
+        .slide-header {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }}
+        
+        .slide-number {{
+            background: #{accent};
+            color: #{background};
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9em;
+        }}
+        
+        .slide-kind {{
+            background: #{primary};
+            color: #{accent};
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        
+        .slide-title {{
+            font-family: {header_font}, sans-serif;
+            font-size: 2.2em;
+            color: #{text_color};
+            margin-bottom: 15px;
+            line-height: 1.2;
+        }}
+        
+        .slide-intent {{
+            color: #{muted};
+            font-size: 0.95em;
+            margin-bottom: 25px;
+            font-style: italic;
+            padding-left: 15px;
+            border-left: 3px solid #{accent}44;
+        }}
+        
+        .slide-bullets {{
+            list-style: none;
+            flex: 1;
+        }}
+        
+        .slide-bullet {{
+            padding: 10px 0 10px 30px;
+            position: relative;
+            font-size: 1.05em;
+            line-height: 1.5;
+            border-bottom: 1px solid #{muted}11;
+        }}
+        
+        .slide-bullet:before {{
             content: "▸";
             position: absolute;
-            left: 0;
-            color: #{theme.get('accent', '00D4FF')};
-        }}
-        .speaker-notes {{
-            background: #{theme.get('background', '0A0A0A')};
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 0.9em;
-            color: #{theme.get('muted', 'A1A1AA')};
-            margin-top: 12px;
-        }}
-        .speaker-notes:before {{
-            content: "🎤 演讲备注";
-            display: block;
-            color: #{theme.get('accent', '00D4FF')};
-            margin-bottom: 8px;
+            left: 5px;
+            color: #{accent};
             font-weight: bold;
         }}
-        .visual-suggestion {{
-            margin-top: 12px;
-            padding: 8px 12px;
-            background: #{theme.get('accent', '00D4FF')}11;
-            border-left: 3px solid #{theme.get('accent', '00D4FF')};
+        
+        .slide-visual {{
+            margin-top: auto;
+            padding: 12px 16px;
+            background: #{accent}0D;
+            border-left: 3px solid #{accent};
             border-radius: 0 8px 8px 0;
+            font-size: 0.85em;
+            color: #{muted};
+        }}
+        
+        .slide-notes {{
+            background: #{primary};
+            padding: 15px 50px;
+            border-top: 1px solid #{muted}22;
+        }}
+        
+        .notes-label {{
+            color: #{accent};
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }}
+        
+        .slide-notes p {{
+            color: #{muted};
+            font-size: 0.85em;
+            line-height: 1.4;
+        }}
+        
+        .navigation {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 25px;
+            width: 100%;
+            max-width: 960px;
+        }}
+        
+        .nav-btn {{
+            background: #{surface};
+            color: #{text_color};
+            border: 1px solid #{muted}33;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95em;
+            transition: all 0.2s;
+        }}
+        
+        .nav-btn:hover {{
+            background: #{accent};
+            color: #{background};
+            border-color: #{accent};
+        }}
+        
+        .nav-btn:disabled {{
+            opacity: 0.3;
+            cursor: not-allowed;
+        }}
+        
+        .page-indicator {{
+            color: #{muted};
+            font-size: 1em;
+            min-width: 80px;
+            text-align: center;
+        }}
+        
+        .thumbnails {{
+            display: flex;
+            gap: 10px;
+            margin-top: 25px;
+            overflow-x: auto;
+            padding: 10px 0;
+            width: 100%;
+            max-width: 960px;
+        }}
+        
+        .thumbnail {{
+            background: #{surface};
+            border: 2px solid #{muted}33;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 80px;
+            text-align: center;
+        }}
+        
+        .thumbnail:hover {{
+            border-color: #{accent};
+        }}
+        
+        .thumbnail.active {{
+            border-color: #{accent};
+            background: #{accent}1A;
+        }}
+        
+        .thumb-number {{
+            display: block;
+            font-weight: bold;
+            color: #{accent};
             font-size: 0.9em;
         }}
+        
+        .thumb-title {{
+            display: block;
+            font-size: 0.7em;
+            color: #{muted};
+            margin-top: 4px;
+        }}
+        
         .review-section {{
-            margin-top: 40px;
-            padding: 24px;
-            background: #{theme.get('surface', '141414')};
+            width: 100%;
+            max-width: 960px;
+            margin-top: 30px;
+            background: #{surface};
             border-radius: 12px;
+            padding: 20px 30px;
         }}
-        .review-section h2 {{
-            color: #{theme.get('accent', '00D4FF')};
-            margin-bottom: 16px;
+        
+        .review-section h3 {{
+            color: #{accent};
+            margin-bottom: 15px;
+            font-size: 1em;
         }}
-        .review-notes {{
+        
+        .review-section ul {{
             list-style: none;
         }}
-        .review-notes li {{
+        
+        .review-section li {{
             padding: 8px 0;
-            border-bottom: 1px solid #{theme.get('muted', 'A1A1AA')}22;
+            color: #{muted};
+            font-size: 0.9em;
+            border-bottom: 1px solid #{muted}11;
         }}
+        
         .action-bar {{
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            background: #{theme.get('surface', '141414')};
+            background: #{surface};
             padding: 16px;
             text-align: center;
-            box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+            border-top: 1px solid #{muted}22;
+            z-index: 100;
         }}
+        
         .btn {{
             padding: 12px 32px;
             border: none;
@@ -475,76 +669,160 @@ def generate_html_preview(deck_json: str, mode: str = "rule") -> str:
             font-size: 1em;
             cursor: pointer;
             margin: 0 8px;
-            transition: opacity 0.2s;
+            transition: all 0.2s;
+            font-weight: 500;
         }}
-        .btn:hover {{ opacity: 0.9; }}
+        
         .btn-primary {{
-            background: #{theme.get('accent', '00D4FF')};
-            color: #{theme.get('background', '0A0A0A')};
+            background: #{accent};
+            color: #{background};
         }}
+        
+        .btn-primary:hover {{
+            background: #{accent}DD;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px #{accent}44;
+        }}
+        
         .btn-secondary {{
-            background: #{theme.get('muted', 'A1A1AA')};
-            color: #{theme.get('background', '0A0A0A')};
+            background: #{muted}33;
+            color: #{text_color};
+        }}
+        
+        .btn-secondary:hover {{
+            background: #{muted}55;
+        }}
+        
+        /* 动画效果 */
+        @keyframes slideIn {{
+            from {{ opacity: 0; transform: translateX(20px); }}
+            to {{ opacity: 1; transform: translateX(0); }}
+        }}
+        
+        .slide {{
+            animation: slideIn 0.3s ease-out;
+        }}
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {{
+            .slide-content {{
+                padding: 25px 30px;
+            }}
+            
+            .slide-title {{
+                font-size: 1.6em;
+            }}
+            
+            .slide-bullet {{
+                font-size: 0.95em;
+            }}
         }}
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>{deck.get('title', 'PPT预览')}</h1>
-            <p>受众：{deck.get('audience', '通用商业受众')} | 风格：{deck.get('style', 'consulting')} | 共 {len(slides)} 页</p>
-        </div>
-
-        <div class="slides-grid">
-"""
-
-    for slide in slides:
-        bullets_html = ""
-        for bullet in slide.get("bullets", []):
-            bullets_html += f'            <li>{bullet}</li>\n'
-
-        html += f"""
-            <div class="slide-card">
-                <span class="slide-number">{slide.get('index', '')}</span>
-                <span class="slide-kind">{slide.get('kind', '')}</span>
-                <h3 class="slide-title">{slide.get('title', '')}</h3>
-                <p class="slide-intent">{slide.get('intent', '')}</p>
-                <ul class="bullets">
-{bullets_html}                </ul>
-                <div class="speaker-notes">{slide.get('speaker_notes', '')}</div>
-                <div class="visual-suggestion">🎨 {slide.get('visual', '')}</div>
-            </div>
-"""
-
-    html += """
-        </div>
-
-        <div class="review-section">
-            <h2>📋 审查意见</h2>
-            <ul class="review-notes">
-"""
-
-    for note in deck.get("review_notes", []):
-        html += f"                <li>{note}</li>\n"
-
-    html += """
-            </ul>
+    <div class="presentation-header">
+        <h1>{deck.get('title', 'PPT预览')}</h1>
+        <div class="meta">
+            受众：{deck.get('audience', '通用商业受众')} | 
+            风格：{deck.get('style', 'consulting')} | 
+            视觉风格：{visual_style} | 
+            共 {len(slides)} 页
         </div>
     </div>
-
+    
+    <div class="slide-viewer">
+        {slides_html}
+    </div>
+    
+    <div class="navigation">
+        <button class="nav-btn" id="prevBtn" onclick="prevSlide()" disabled>◀ 上一页</button>
+        <span class="page-indicator" id="pageIndicator">1 / {len(slides)}</span>
+        <button class="nav-btn" id="nextBtn" onclick="nextSlide()" {'disabled' if len(slides) <= 1 else ''}>下一页 ▶</button>
+    </div>
+    
+    <div class="thumbnails">
+        {thumbnails_html}
+    </div>
+    
+    <div class="review-section">
+        <h3>📋 审查意见</h3>
+        <ul>
+            {review_html}
+        </ul>
+    </div>
+    
     <div class="action-bar">
         <button class="btn btn-primary" onclick="confirmGeneration()">✅ 确认生成PPTX</button>
-        <button class="btn btn-secondary" onclick="window.close()">❌ 取消</button>
+        <button class="btn btn-secondary" onclick="window.close()">❌ 关闭预览</button>
     </div>
-
+    
     <script>
-        function confirmGeneration() {
-            if (confirm('确认要生成PPTX文件吗？')) {
-                fetch('/api/confirm', { method: 'POST' })
-                    .then(() => alert('PPTX生成已启动，请查看outputs目录'))
-                    .catch(() => alert('请在命令行中确认生成'));
-            }
-        }
+        let currentSlide = 0;
+        const totalSlides = {len(slides)};
+        
+        function showSlide(index) {{
+            // 隐藏所有幻灯片
+            document.querySelectorAll('.slide').forEach(s => s.style.display = 'none');
+            // 显示目标幻灯片
+            document.getElementById('slide-' + index).style.display = 'flex';
+            
+            // 更新缩略图状态
+            document.querySelectorAll('.thumbnail').forEach((t, i) => {{
+                t.classList.toggle('active', i === index);
+            }});
+            
+            // 更新页面指示器
+            document.getElementById('pageIndicator').textContent = (index + 1) + ' / ' + totalSlides;
+            
+            // 更新按钮状态
+            document.getElementById('prevBtn').disabled = index === 0;
+            document.getElementById('nextBtn').disabled = index === totalSlides - 1;
+            
+            currentSlide = index;
+        }}
+        
+        function nextSlide() {{
+            if (currentSlide < totalSlides - 1) {{
+                showSlide(currentSlide + 1);
+            }}
+        }}
+        
+        function prevSlide() {{
+            if (currentSlide > 0) {{
+                showSlide(currentSlide - 1);
+            }}
+        }}
+        
+        function goToSlide(index) {{
+            showSlide(index);
+        }}
+        
+        // 键盘导航
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {{
+                nextSlide();
+            }} else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {{
+                prevSlide();
+            }}
+        }});
+        
+        function confirmGeneration() {{
+            if (confirm('确认要生成PPTX文件吗？')) {{
+                // 从URL中提取session_id
+                const pathParts = window.location.pathname.split('/');
+                const sessionId = pathParts[pathParts.length - 2];
+                
+                fetch('/api/sessions/' + sessionId + '/confirm', {{ method: 'POST' }})
+                    .then(response => {{
+                        if (response.ok) {{
+                            alert('PPTX生成成功！请在前端页面下载。');
+                        }} else {{
+                            alert('生成失败，请在前端页面重试。');
+                        }}
+                    }})
+                    .catch(() => alert('请在前端页面确认生成'));
+            }}
+        }}
     </script>
 </body>
 </html>"""
