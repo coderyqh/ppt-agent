@@ -47,6 +47,10 @@ async def generate_ppt_task(
     session.status = "processing"
     session.updated_at = datetime.now()
 
+    # 等待WebSocket连接建立
+    logger.info(f"[{session_id}] 等待WebSocket连接建立...")
+    await asyncio.sleep(0.5)
+
     try:
         # Step 1: 创建Brief
         logger.info(f"[{session_id}] Step 1: 创建Brief")

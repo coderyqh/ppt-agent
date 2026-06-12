@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { TopicForm } from './components/TopicForm'
 import { ProgressStream } from './components/ProgressStream'
 import { DeckViewer } from './components/DeckViewer'
@@ -33,14 +33,17 @@ function App() {
   const [isConfirming, setIsConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // WebSocket连接
+  // WebSocket连接 - 只有当sessionId存在时才连接
+  const wsUrl = sessionId ? `ws://localhost:8000/ws/${sessionId}` : null
+
   const {
     isConnected,
     messages,
     clearMessages,
   } = useWebSocket({
-    url: sessionId ? `ws://localhost:8000/ws/${sessionId}` : '',
+    url: wsUrl || '',
     onMessage: useCallback((message: WebSocketMessage) => {
+      console.log('收到WebSocket消息:', message)
       if (message.type === 'deck_ready' && message.deck) {
         setDeck(message.deck)
         setState('preview')
@@ -49,14 +52,15 @@ function App() {
         setError(message.message || '生成失败')
       }
     }, []),
+    enabled: !!wsUrl, // 只有当wsUrl存在时才启用连接
   })
 
   // 提交表单
   const handleSubmit = async (formData: any) => {
     setError(null)
-    setState('generating')
 
     try {
+      // 先创建会话获取sessionId
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -76,7 +80,11 @@ function App() {
       }
 
       const data = await response.json()
+      console.log('会话创建成功:', data.session_id)
+
+      // 设置sessionId，这会触发WebSocket连接
       setSessionId(data.session_id)
+      setState('generating')
     } catch (err) {
       setError(err instanceof Error ? err.message : '请求失败')
       setState('form')
