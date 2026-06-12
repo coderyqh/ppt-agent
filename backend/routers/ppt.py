@@ -158,15 +158,31 @@ async def test_llm_connection():
             import asyncio
             
             def test_request():
-                response = client.client.chat.completions.create(
-                    model=client.model,
-                    messages=[
-                        {"role": "user", "content": "你好，请回复'OK'"}
+                # 构建请求参数
+                request_params = {
+                    "model": client.model,
+                    "messages": [
+                        {"role": "user", "content": "你好，请简单回复'OK'即可"}
                     ],
-                    max_tokens=10,
-                    temperature=0
-                )
-                return response.choices[0].message.content
+                    "temperature": 0,
+                }
+                
+                # MiMo API使用max_completion_tokens
+                if "xiaomimimo.com" in client.base_url:
+                    request_params["max_completion_tokens"] = 50
+                    request_params["extra_body"] = {"thinking": {"type": "disabled"}}
+                else:
+                    request_params["max_tokens"] = 50
+                
+                logger.info(f"发送测试请求: {request_params}")
+                response = client.client.chat.completions.create(**request_params)
+                
+                # 获取响应内容
+                content = response.choices[0].message.content
+                logger.info(f"原始响应: {content}")
+                logger.info(f"响应对象: {response}")
+                
+                return content or "(空响应)"
             
             result = await asyncio.to_thread(test_request)
             logger.info(f"LLM测试请求成功，响应: {result}")
@@ -177,7 +193,7 @@ async def test_llm_connection():
                 "details": {
                     "model": client.model,
                     "base_url": client.base_url,
-                    "test_response": result
+                    "test_response": result,
                 }
             }
         except Exception as e:
