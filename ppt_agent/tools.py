@@ -290,21 +290,78 @@ def apply_design(
 def review_deck(deck_json: str, mode: str = "rule") -> dict[str, Any]:
     """检查Deck质量并返回审查意见。支持 rule/llm/auto 模式。"""
     deck = json.loads(deck_json) if isinstance(deck_json, str) else deck_json
+    
+    # 获取主题信息用于相关性检查
+    deck_title = deck.get("title", "")
+    slides = deck.get("slides", [])
+    
+    # 合法的幻灯片类型
+    VALID_SLIDE_KINDS = {"title", "context", "problem", "insight", "framework", "evidence", "roadmap", "deep_dive", "closing"}
 
     def rule():
         notes = []
-        for slide in deck.get("slides", []):
-            if not slide.get("title"):
-                notes.append(f"第 {slide['index']} 页缺少标题。")
-            if len(slide.get("bullets", [])) > 5:
-                notes.append(f"第 {slide['index']} 页要点过多，建议压缩到 5 条以内。")
-            if any(len(b) > 42 for b in slide.get("bullets", [])):
-                notes.append(f"第 {slide['index']} 页存在较长 bullet，建议拆分或改写。")
-        return notes or ["基础检查通过：标题、页数和页面密度正常。"]
+        slide_kinds_seen = []
+        
+        for slide in slides:
+            index = slide.get("index", 0)
+            kind = slide.get("kind", "")
+            title = slide.get("title", "")
+            bullets = slide.get("bullets", [])
+            
+            # 原有检查：标题是否存在
+            if not title:
+                notes.append(f"第 {index} 页缺少标题。")
+            
+            # 原有检查：bullets数量 <= 5
+            if len(bullets) > 5:
+                notes.append(f"第 {index} 页要点过多，建议压缩到 5 条以内。")
+            
+            # 原有检查：单条bullet长度 <= 42字符
+            if any(len(b) > 42 for b in bullets):
+                notes.append(f"第 {index} 页存在较长 bullet，建议拆分或改写。")
+            
+            # 新增检查：bullets是否为空
+            if not bullets:
+                notes.append(f"第 {index} 页缺少要点内容。")
+            
+            # 新增检查：幻灯片类型是否合法
+            if kind not in VALID_SLIDE_KINDS:
+                notes.append(f"第 {index} 页类型 '{kind}' 不合法。")
+            
+            # 新增检查：标题是否包含主题关键词（简单检查）
+            if deck_title and len(deck_title) > 1:
+                # 提取主题关键词（去掉常见停用词）
+                topic_words = [w for w in deck_title if len(w) > 1 and w not in {"的", "和", "与", "及", "或", "是", "在", "有", "为", "了"}]
+                # 检查标题是否至少包含一个主题关键词（非title类型的幻灯片）
+                if kind != "title" and topic_words:
+                    has_topic_keyword = any(word in title for word in topic_words)
+                    if not has_topic_keyword and title:
+                        notes.append(f"第 {index} 页标题 '{title}' 可能与主题 '{deck_title}' 相关性较低。")
+            
+            slide_kinds_seen.append(kind)
+        
+        # 新增检查：是否有重复的幻灯片类型
+        from collections import Counter
+        kind_counts = Counter(slide_kinds_seen)
+        for kind, count in kind_counts.items():
+            if count > 1 and kind not in {"deep_dive", "context"}:
+                notes.append(f"幻灯片类型 '{kind}' 出现了 {count} 次，可能存在重复内容。")
+        
+        # 新增检查：幻灯片数量是否合理
+        if len(slides) < 3:
+            notes.append(f"幻灯片数量过少（{len(slides)} 页），建议至少 3 页。")
+        elif len(slides) > 30:
+            notes.append(f"幻灯片数量过多（{len(slides)} 页），建议不超过 30 页。")
+        
+        return notes or ["基础检查通过：标题、页数、页面密度和主题相关性正常。"]
 
     def llm(client: LLMClient):
         rule_notes = rule()
-        llm_notes = client.review_deck_quality(json.dumps(deck, ensure_ascii=False))
+        # 传入主题信息用于LLM审核
+        llm_notes = client.review_deck_quality(
+            json.dumps(deck, ensure_ascii=False),
+            topic=deck_title
+        )
         return rule_notes + llm_notes
 
     notes, mode_used = _execute_with_mode(mode, rule, llm)
@@ -889,16 +946,53 @@ def _title_for(kind: str, topic: str) -> str:
 
 
 def _bullets_for(kind: str, brief: dict, insights: list[str]) -> list[str]:
+    topic = brief.get("topic", "")
+    audience = brief.get("audience", "通用商业受众")
+    style = brief.get("style", "consulting")
+    
     defaults = {
-        "title": [f"面向{brief['audience']}", f"{brief['style']}风格演示"],
-        "context": ["需求从单点生成走向端到端交付", "企业更关注可编辑、可追溯、可复用", "Agent 适合承接多步骤内容工作流"],
-        "problem": ["资料分散导致准备成本高", "内容、设计和格式之间缺少统一编排", "模板与品牌规范难以稳定执行"],
-        "insight": insights[:3],
-        "framework": ["Brief 理解", "资料研究", "大纲规划", "页面写作", "设计渲染", "审稿迭代"],
-        "evidence": ["以市场产品能力作为参照", "以企业模板和内部资料作为壁垒", "以导出质量和可编辑性作为交付标准"],
-        "roadmap": ["MVP：主题到 PPTX", "增强：资料/RAG/模板", "生产化：权限、审计、视觉 QA"],
-        "deep_dive": ["聚焦一个高价值场景", "明确输入、输出和验收标准", "沉淀为可复用 skill"],
-        "closing": ["先做垂直场景闭环", "用结构化 deck JSON 管控质量", "逐步叠加企业级能力"],
+        "title": [f"面向{audience}", f"{style}风格演示"],
+        "context": [
+            f"{topic}领域正在经历快速变革",
+            f"市场对{topic}的需求持续增长",
+            f"企业需要在{topic}方面建立竞争优势"
+        ],
+        "problem": [
+            f"传统{topic}方案效率低下",
+            f"缺乏系统化的{topic}方法论",
+            f"{topic}资源配置不合理"
+        ],
+        "insight": insights[:3] if insights else [
+            f"{topic}是未来发展的关键驱动力",
+            f"系统化方法能显著提升{topic}效果",
+            f"投资{topic}将带来长期回报"
+        ],
+        "framework": [
+            f"需求分析：明确{topic}目标",
+            f"方案设计：构建{topic}体系",
+            f"执行落地：分阶段推进",
+            f"持续优化：迭代改进"
+        ],
+        "evidence": [
+            f"行业案例：领先企业在{topic}方面的实践",
+            f"数据支撑：{topic}投资回报率分析",
+            f"趋势预测：{topic}未来发展方向"
+        ],
+        "roadmap": [
+            f"第一阶段：{topic}基础建设",
+            f"第二阶段：{topic}能力提升",
+            f"第三阶段：{topic}价值变现"
+        ],
+        "deep_dive": [
+            f"深入分析{topic}的核心要素",
+            f"探讨{topic}的最佳实践",
+            f"制定{topic}的行动方案"
+        ],
+        "closing": [
+            f"总结{topic}的核心价值",
+            f"明确下一步行动计划",
+            f"展望{topic}的未来发展"
+        ],
     }
     return defaults.get(kind, insights[:3])[:5]
 

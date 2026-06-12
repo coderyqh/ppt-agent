@@ -212,19 +212,29 @@ kind可选值：title, context, problem, insight, framework, evidence, roadmap, 
         content = response.choices[0].message.content or "[]"
         return self._parse_json_array(content)
 
-    def review_deck_quality(self, deck_json: str) -> list[str]:
+    def review_deck_quality(self, deck_json: str, topic: str = "") -> list[str]:
         """用LLM进行语义级质量审查。"""
+        topic_context = f'主题为"{topic}"' if topic else "未指定主题"
+        
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": "你是PPT质量审查专家。只输出JSON数组。"},
                 {"role": "user", "content": f"""
-审查以下PPT Deck，从以下维度给出具体建议：
+审查以下PPT Deck（{topic_context}），从以下维度给出具体建议：
+
 1. 叙事逻辑是否连贯
 2. 每页意图是否清晰
 3. 标题是否像真实商业PPT
 4. 要点是否精炼有力
 5. 演讲备注是否实用
+6. **主题相关性**：每页内容是否与主题"{topic}"紧密相关？是否有与主题无关的内容页？
+7. **内容独特性**：是否有重复或模板化内容？各页之间是否有明确区分？
+
+重点关注：
+- 如果发现与主题无关的内容页，明确指出是哪一页
+- 如果发现模板化/通用性内容，建议如何改为与主题相关的内容
+- 检查各页之间是否有逻辑递进关系
 
 Deck内容：
 {deck_json}
