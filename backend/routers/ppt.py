@@ -1,31 +1,39 @@
 from __future__ import annotations
 
-import uuid
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from ..schemas.ppt import PPTRequest, PPTResponse, SessionStatus
+from ppt_agent import FeedbackRequest, PPTAgentV2Pipeline
+
+from ..schemas.ppt import FeedbackPayload, PPTRequest, PPTResponse, SessionStatus
 from ..services.ppt_service import generate_ppt_task
 
+
 logger = logging.getLogger("ppt_router")
-
 router = APIRouter(prefix="/api", tags=["ppt"])
-
-# 内存存储会话状态
 sessions: Dict[str, SessionStatus] = {}
 
 
-@router.post("/sessions", response_model=PPTResponse)
-async def create_session(request: PPTRequest, background_tasks: BackgroundTasks):
-    """创建PPT生成会话"""
-    session_id = str(uuid.uuid4())[:8]
-    logger.info(f"创建会话 {session_id}, 请求参数: {request.model_dump()}")
+@router.post("/uploads")
+async def upload_source(file: UploadFile = File(...)) -> dict[str, str | int]:
+    upload_dir = Path("workspace") / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "upload.bin").name
+    target = upload_dir / f"{uuid.uuid4().hex[:8]}-{safe_name}"
+    content = await file.read()
+    target.write_bytes(content)
+    return {"filename": safe_name, "path": str(target), "size": len(content)}
 
+
+@router.post("/sessions", response_model=PPTResponse)
+async def create_session(request: PPTRequest, background_tasks: BackgroundTasks) -> PPTResponse:
+    session_id = str(uuid.uuid4())[:8]
     session = SessionStatus(
         session_id=session_id,
         status="pending",
@@ -33,78 +41,79 @@ async def create_session(request: PPTRequest, background_tasks: BackgroundTasks)
         updated_at=datetime.now(),
     )
     sessions[session_id] = session
-
-    # 后台启动生成任务
-    background_tasks.add_task(
-        generate_ppt_task,
-        session_id=session_id,
-        params=request.model_dump(),
-        sessions=sessions,
-    )
-
-    logger.info(f"会话 {session_id} 已创建，后台任务已启动")
-
+    background_tasks.add_task(generate_ppt_task, session_id, request.model_dump(), sessions)
+    logger.info("created PPT session %s", session_id)
     return PPTResponse(
         session_id=session_id,
         status="pending",
-        message="PPT生成任务已创建，请通过WebSocket接收进度",
+        message="PPT generation session created. Connect to WebSocket for progress.",
     )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionStatus)
-async def get_session(session_id: str):
-    """获取会话状态"""
-    logger.info(f"查询会话状态: {session_id}")
-    if session_id not in sessions:
-        logger.warning(f"会话不存在: {session_id}")
-        raise HTTPException(status_code=404, detail="会话不存在")
-    return sessions[session_id]
+async def get_session(session_id: str) -> SessionStatus:
+    session = sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @router.post("/sessions/{session_id}/confirm")
-async def confirm_generation(session_id: str):
-    """确认生成PPTX"""
-    logger.info(f"确认生成PPTX: {session_id}")
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    session = sessions[session_id]
+async def confirm_generation(session_id: str) -> dict[str, str]:
+    session = sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     if session.status != "completed" or not session.deck:
-        logger.warning(f"会话状态不正确: {session.status}")
-        raise HTTPException(status_code=400, detail="会话未完成或Deck数据不存在")
+        raise HTTPException(status_code=400, detail="Session is not completed yet")
 
+    workspace_dir = Path("workspace") / session_id
+    output_dir = Path("outputs") / session_id
     try:
-        from ppt_agent.tools import render_pptx
-        import asyncio
-
-        deck_path = Path("workspace") / "deck.json"
-        logger.info(f"开始渲染PPTX: {deck_path}")
-        pptx_path = await asyncio.to_thread(render_pptx, str(deck_path))
-        logger.info(f"PPTX渲染完成: {pptx_path}")
-
+        pipeline = PPTAgentV2Pipeline(workspace_dir=workspace_dir, output_dir=output_dir)
+        pptx_path = pipeline.export_pptx()
         session.pptx_url = f"/api/sessions/{session_id}/download"
         session.updated_at = datetime.now()
+        return {"message": "PPTX exported", "download_url": session.pptx_url, "path": str(pptx_path)}
+    except Exception as exc:
+        logger.exception("PPTX render failed for session %s", session_id)
+        raise HTTPException(status_code=500, detail=f"PPTX export failed: {exc}") from exc
 
-        return {"message": "PPTX生成成功", "download_url": session.pptx_url}
-    except Exception as e:
-        logger.error(f"PPTX渲染失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"PPTX生成失败: {str(e)}")
+
+@router.post("/sessions/{session_id}/feedback")
+async def apply_session_feedback(session_id: str, feedback: FeedbackPayload) -> dict[str, str]:
+    session = sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != "completed" or not session.deck:
+        raise HTTPException(status_code=400, detail="Session is not completed yet")
+
+    pipeline = PPTAgentV2Pipeline(workspace_dir=Path("workspace") / session_id, output_dir=Path("outputs") / session_id)
+    try:
+        deck_path = pipeline.apply_feedback(
+            FeedbackRequest(
+                action=feedback.action,
+                instruction=feedback.instruction,
+                slide_id=feedback.slide_id,
+                payload=feedback.payload,
+            )
+        )
+        import json
+
+        session.deck = json.loads(deck_path.read_text(encoding="utf-8"))
+        session.updated_at = datetime.now()
+        return {"message": "Feedback applied", "deck_path": str(deck_path)}
+    except Exception as exc:
+        logger.exception("Feedback failed for session %s", session_id)
+        raise HTTPException(status_code=500, detail=f"Feedback failed: {exc}") from exc
 
 
 @router.get("/sessions/{session_id}/download")
-async def download_pptx(session_id: str):
-    """下载PPTX文件"""
-    logger.info(f"下载PPTX: {session_id}")
+async def download_pptx(session_id: str) -> FileResponse:
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    session = sessions[session_id]
-    pptx_path = Path("outputs") / "deck.pptx"
-
+        raise HTTPException(status_code=404, detail="Session not found")
+    pptx_path = Path("outputs") / session_id / "deck.pptx"
     if not pptx_path.exists():
-        logger.warning(f"PPTX文件不存在: {pptx_path}")
-        raise HTTPException(status_code=404, detail="PPTX文件不存在")
-
+        raise HTTPException(status_code=404, detail="PPTX does not exist. Export first.")
     return FileResponse(
         path=str(pptx_path),
         filename=f"ppt_{session_id}.pptx",
@@ -113,107 +122,69 @@ async def download_pptx(session_id: str):
 
 
 @router.get("/sessions/{session_id}/preview")
-async def get_preview(session_id: str):
-    """获取HTML预览"""
-    logger.info(f"获取预览: {session_id}")
+async def get_preview(session_id: str) -> FileResponse:
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    preview_path = Path("workspace") / "preview.html"
+        raise HTTPException(status_code=404, detail="Session not found")
+    preview_path = Path("workspace") / session_id / "preview.html"
     if not preview_path.exists():
-        logger.warning(f"预览文件不存在: {preview_path}")
-        raise HTTPException(status_code=404, detail="预览文件不存在")
+        raise HTTPException(status_code=404, detail="Preview does not exist")
+    return FileResponse(path=str(preview_path), media_type="text/html")
 
-    return FileResponse(
-        path=str(preview_path),
-        media_type="text/html",
-    )
+
+@router.get("/sessions/{session_id}/artifacts")
+async def list_artifacts(session_id: str) -> dict:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    manifest = Path("workspace") / session_id / "artifacts.json"
+    if not manifest.exists():
+        return {"artifacts": []}
+    import json
+
+    return {"artifacts": json.loads(manifest.read_text(encoding="utf-8"))}
 
 
 @router.get("/test-llm")
-async def test_llm_connection():
-    """测试大模型接口是否正常"""
-    logger.info("测试LLM接口连接...")
-    
+async def test_llm_connection() -> dict:
+    logger.info("Testing LLM connection...")
     try:
-        from ppt_agent.llm import LLMClient, LLMError
-        
-        # 尝试创建LLM客户端
-        try:
-            client = LLMClient()
-            logger.info(f"LLM客户端创建成功，模型: {client.model}, Base URL: {client.base_url}")
-        except LLMError as e:
-            logger.error(f"LLM客户端创建失败: {e}")
-            return {
-                "status": "error",
-                "message": f"LLM客户端创建失败: {str(e)}",
-                "details": {
-                    "error_type": "config_error",
-                    "suggestion": "请检查环境变量 MIMO_API_KEY 或 OPENAI_API_KEY 是否正确设置"
-                }
+        from ppt_agent.llm import LLMClient
+
+        client = LLMClient()
+        logger.info(f"LLM client created: model={client.model}, base_url={client.base_url}")
+
+        # 发送测试请求验证API连通性
+        def test_request():
+            request_params = {
+                "model": client.model,
+                "messages": [{"role": "user", "content": "Hello, reply 'OK' only."}],
+                "temperature": 0,
             }
-        
-        # 尝试发送测试请求
-        try:
-            import asyncio
-            
-            def test_request():
-                # 构建请求参数
-                request_params = {
-                    "model": client.model,
-                    "messages": [
-                        {"role": "user", "content": "你好，请简单回复'OK'即可"}
-                    ],
-                    "temperature": 0,
-                }
-                
-                # MiMo API使用max_completion_tokens
-                if "xiaomimimo.com" in client.base_url:
-                    request_params["max_completion_tokens"] = 50
-                    request_params["extra_body"] = {"thinking": {"type": "disabled"}}
-                else:
-                    request_params["max_tokens"] = 50
-                
-                logger.info(f"发送测试请求: {request_params}")
-                response = client.client.chat.completions.create(**request_params)
-                
-                # 获取响应内容
-                content = response.choices[0].message.content
-                logger.info(f"原始响应: {content}")
-                logger.info(f"响应对象: {response}")
-                
-                return content or "(空响应)"
-            
-            result = await asyncio.to_thread(test_request)
-            logger.info(f"LLM测试请求成功，响应: {result}")
-            
-            return {
-                "status": "success",
-                "message": "LLM接口连接正常",
-                "details": {
-                    "model": client.model,
-                    "base_url": client.base_url,
-                    "test_response": result,
-                }
-            }
-        except Exception as e:
-            logger.error(f"LLM测试请求失败: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "message": f"LLM测试请求失败: {str(e)}",
-                "details": {
-                    "error_type": "api_error",
-                    "model": client.model,
-                    "base_url": client.base_url,
-                    "suggestion": "请检查API密钥是否有效，以及网络连接是否正常"
-                }
-            }
-    except Exception as e:
-        logger.error(f"测试LLM接口时发生未知错误: {e}", exc_info=True)
+            if "xiaomimimo.com" in client.base_url:
+                request_params["max_completion_tokens"] = 10
+                request_params["extra_body"] = {"thinking": {"type": "disabled"}}
+            else:
+                request_params["max_tokens"] = 10
+
+            response = client.client.chat.completions.create(**request_params)
+            return response.choices[0].message.content
+
+        import asyncio
+        result = await asyncio.to_thread(test_request)
+        logger.info(f"LLM test response: {result}")
+
+        return {
+            "status": "success",
+            "message": "API key and LLM connection verified",
+            "details": {
+                "model": client.model,
+                "base_url": client.base_url,
+                "test_response": result or "(empty response)",
+            },
+        }
+    except Exception as exc:
+        logger.error(f"LLM test failed: {exc}", exc_info=True)
         return {
             "status": "error",
-            "message": f"测试失败: {str(e)}",
-            "details": {
-                "error_type": "unknown_error"
-            }
+            "message": f"LLM connection test failed: {exc}",
+            "details": {"suggestion": "Check MIMO_API_KEY / OPENAI_API_KEY and base URL settings."},
         }
